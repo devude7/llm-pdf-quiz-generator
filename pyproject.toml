@@ -1,0 +1,30 @@
+[project]
+name = "llm-pdf-quiz-generator"
+version = "0.1.0"
+description = "Generate educational quizzes from PDF documents using a local instruction-tuned LLM."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "accelerate>=1.8.1",
+    "bitsandbytes>=0.46.0; platform_system != 'Windows'",
+    "pdf2image>=1.17.0",
+    "pypdf>=5.6.1",
+    "pytesseract>=0.3.13",
+    "python-dotenv>=1.1.0",
+    "reportlab>=4.4.2",
+    "torch>=2.7.0",
+    "transformers>=4.52.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

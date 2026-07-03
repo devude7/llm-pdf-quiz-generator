@@ -1,0 +1,18 @@
+[model]
+name = "Qwen/Qwen2.5-7B-Instruct"
+quantized = true
+
+[generation]
+max_new_tokens = 2500
+chunk_size = 5000
+
+[ocr]
+enabled = true
+language = "eng"
+dpi = 200
+max_pages = 0
+min_text_length = 300
+
+[output]
+directory = "output"
+basename = "generated_quiz"

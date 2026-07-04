@@ -5,6 +5,7 @@ quantized = true
 [generation]
 max_new_tokens = 2500
 chunk_size = 5000
+chunk_overlap = 700
 
 [ocr]
 enabled = true

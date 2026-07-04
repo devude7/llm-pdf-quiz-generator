@@ -179,7 +179,6 @@ def save_quiz_as_pdf(quiz_data, filename):
     story = [Paragraph("Generated Quiz", title_style)]
     metadata = quiz_data.get("metadata", {})
 
-    story.append(Paragraph(f"<b>Source PDF:</b> {prepare_text_for_pdf(metadata.get('source_pdf', '-'))}", normal_style))
     story.append(Paragraph(f"<b>Language:</b> {prepare_text_for_pdf(metadata.get('language', '-'))}", normal_style))
     story.append(
         Paragraph(
@@ -187,7 +186,6 @@ def save_quiz_as_pdf(quiz_data, filename):
             normal_style,
         )
     )
-    story.append(Paragraph(f"<b>Created at:</b> {prepare_text_for_pdf(metadata.get('created_at', '-'))}", normal_style))
     story.append(Spacer(1, 10))
     story.append(Paragraph("Quiz questions", heading_style))
 

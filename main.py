@@ -58,6 +58,7 @@ def main(argv=None):
         question_type=args.type,
         language=args.language,
         chunk_size=config.generation.chunk_size,
+        chunk_overlap=config.generation.chunk_overlap,
         min_text_length=config.ocr.min_text_length,
         ocr_lang=config.ocr.language,
         ocr_dpi=config.ocr.dpi,

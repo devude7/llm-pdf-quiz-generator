@@ -13,9 +13,10 @@ class ModelConfig:
 
 
 class GenerationConfig:
-    def __init__(self, max_new_tokens=2500, chunk_size=5000):
+    def __init__(self, max_new_tokens=2500, chunk_size=5000, chunk_overlap=700):
         self.max_new_tokens = max_new_tokens
         self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
 
 
 class OcrConfig:
@@ -73,6 +74,7 @@ def load_config(path="config.toml"):
         generation=GenerationConfig(
             max_new_tokens=int(generation.get("max_new_tokens", 2500)),
             chunk_size=int(generation.get("chunk_size", 5000)),
+            chunk_overlap=int(generation.get("chunk_overlap", 700)),
         ),
         ocr=OcrConfig(
             enabled=bool(ocr.get("enabled", True)),

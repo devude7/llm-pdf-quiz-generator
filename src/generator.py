@@ -1,4 +1,5 @@
 import math
+import random
 import re
 from importlib.util import find_spec
 
@@ -130,12 +131,20 @@ class QuizGenerator:
                 - Use only information from the notes.
                 - Do not invent facts that are not present in the notes.
                 - Do not create questions about incidental example sentences, references, author affiliations,
-                page headers, footers, captions, or bibliography unless they explain a key concept.
+                page headers, footers, captions, bibliography, figure numbers, table numbers, row labels,
+                visual layout details, or diagram labels.
+                - Do not ask what is shown in Figure N/Table N, which figure/table contains something,
+                or which row/label is highlighted in a visualization.
+                - If a figure or table explains an important concept, ask about the underlying concept,
+                method, result, or conclusion instead of the figure/table identifier.
+                - Avoid questions that require exact mathematical notation or formula transcription when
+                the notes contain symbols, superscripts, subscripts, or formatting that may be ambiguous.
                 Focus on definitions, methods, architecture, results, comparisons, limitations and conclusions.
                 - Do not add explanations.
                 - Do not add any text before or after the quiz.
                 - Do not include a line called Type.
                 - Every question must contain a line starting exactly with: Correct answer:
+                - Present questions in a mixed order instead of following the notes order exactly.
 
                 {type_instructions}
 
@@ -161,20 +170,146 @@ class QuizGenerator:
         return result.strip()
 
 
-def split_text(text, max_chars=5000):
-    chunks = []
-    current_chunk = ""
+def normalize_pdf_text(text):
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
 
-    for paragraph in text.split("\n"):
-        if len(current_chunk) + len(paragraph) < max_chars:
-            current_chunk += paragraph + "\n"
+    paragraphs = []
+    current_lines = []
+
+    def flush_current_lines():
+        if current_lines:
+            paragraphs.append(" ".join(current_lines).strip())
+            current_lines.clear()
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush_current_lines()
+            continue
+
+        if re.match(r"^---\s*(?:OCR\s+)?Page\s+\d+\s*---$", line, flags=re.IGNORECASE):
+            flush_current_lines()
+            paragraphs.append(line)
+            continue
+
+        current_lines.append(line)
+
+    flush_current_lines()
+    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph).strip()
+
+
+def is_visual_caption_block(text):
+    caption_patterns = [
+        r"^\s*(?:\d+\s+)?(?:figure|fig\.)\s+\d+\s*[:.]",
+        r"^\s*(?:\d+\s+)?(?:figure|fig\.)\s+\d+\b",
+    ]
+    if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in caption_patterns):
+        return True
+
+    figure_mentions = len(re.findall(r"\b(?:figure|fig\.)\s+\d+\b", text, flags=re.IGNORECASE))
+    word_count = len(re.findall(r"\w+", text))
+    return figure_mentions > 0 and word_count <= 35
+
+
+def split_into_sentences(text):
+    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text) if sentence.strip()]
+
+
+def split_long_text(text, max_chars):
+    if len(text) <= max_chars:
+        return [text]
+
+    blocks = []
+    current = ""
+    for sentence in split_into_sentences(text):
+        if len(sentence) > max_chars:
+            if current.strip():
+                blocks.append(current.strip())
+                current = ""
+            for start in range(0, len(sentence), max_chars):
+                blocks.append(sentence[start : start + max_chars].strip())
+            continue
+
+        if len(current) + len(sentence) + 1 <= max_chars:
+            current = f"{current} {sentence}".strip()
         else:
-            if current_chunk.strip():
-                chunks.append(current_chunk.strip())
-            current_chunk = paragraph + "\n"
+            if current.strip():
+                blocks.append(current.strip())
+            current = sentence
 
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
+    if current.strip():
+        blocks.append(current.strip())
+
+    return blocks
+
+
+def split_into_blocks(text, max_block_chars=1200):
+    normalized_text = normalize_pdf_text(text)
+    blocks = []
+
+    for paragraph in re.split(r"\n\s*\n", normalized_text):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        if is_visual_caption_block(paragraph):
+            continue
+        blocks.extend(split_long_text(paragraph, max_block_chars))
+
+    return blocks
+
+
+def get_overlap_text(text, max_chars):
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text.strip()
+
+    overlap = text[-max_chars:]
+    sentence_start = re.search(r"(?<=[.!?])\s+", overlap)
+    if sentence_start:
+        overlap = overlap[sentence_start.end() :]
+
+    return overlap.strip()
+
+
+def split_text(text, max_chars=5000, overlap_chars=700):
+    if max_chars <= 0:
+        raise ValueError("max_chars must be greater than 0.")
+    if overlap_chars < 0:
+        raise ValueError("overlap_chars cannot be negative.")
+    if overlap_chars >= max_chars:
+        raise ValueError("overlap_chars must be smaller than max_chars.")
+
+    blocks = split_into_blocks(text)
+    chunks = []
+    current_blocks = []
+    current_length = 0
+
+    for block in blocks:
+        added_length = len(block) + (2 if current_blocks else 0)
+        if current_blocks and current_length + added_length > max_chars:
+            chunk = "\n\n".join(current_blocks).strip()
+            chunks.append(chunk)
+
+            overlap_limit = max(0, min(overlap_chars, max_chars - len(block) - 2))
+            overlap = get_overlap_text(chunk, overlap_limit)
+            current_blocks = [overlap] if overlap else []
+            current_length = len(overlap) if overlap else 0
+
+        if len(block) > max_chars:
+            chunks.extend(split_long_text(block, max_chars))
+            current_blocks = []
+            current_length = 0
+        elif current_blocks:
+            current_blocks.append(block)
+            current_length += len(block) + 2
+        else:
+            current_blocks = [block]
+            current_length = len(block)
+
+    if current_blocks:
+        chunks.append("\n\n".join(current_blocks).strip())
 
     return chunks
 
@@ -193,14 +328,59 @@ def renumber_questions(text):
     return "\n".join(new_lines).strip()
 
 
-def calculate_number_of_chunks(total_questions):
+def split_question_blocks(text):
+    return [
+        block.strip()
+        for block in re.split(r"\n(?=\s*Question\s+\d+\s*:)", text.strip())
+        if block.strip()
+    ]
+
+
+def is_low_quality_question_block(block):
+    question_match = re.search(
+        r"Question:\s*(.*?)(?=\n\s*(?:A\.|B\.|C\.|D\.|Correct answer:)|\Z)",
+        block,
+        flags=re.DOTALL,
+    )
+    question_text = question_match.group(1) if question_match else block
+    question_text = re.sub(r"\s+", " ", question_text).strip()
+
+    blocked_patterns = [
+        r"\b(?:figure|fig\.)\s*\d+\b",
+        r"\btable\s*\d+\b",
+        r"\bfigures?\b",
+        r"\btables?\b",
+        r"\brow\s*\([A-Z]\)",
+        r"\bwhich\s+(?:figure|fig\.|table|row)\b",
+        r"\bshown\s+in\s+(?:figure|fig\.|table)\b",
+        r"\billustrated\s+in\s+(?:figure|fig\.|table|figures)\b",
+        r"\baccording\s+to\s+(?:figure|fig\.|table)\b",
+        r"\bhighlighted\s+in\s+(?:figure|fig\.|table|a visualization)\b",
+        r"\bvisuali[sz]ation\b",
+    ]
+    return any(re.search(pattern, question_text, flags=re.IGNORECASE) for pattern in blocked_patterns)
+
+
+def add_accepted_question_blocks(quiz, accepted_question_blocks, total_questions):
+    for block in split_question_blocks(quiz):
+        if len(accepted_question_blocks) >= total_questions:
+            break
+        if is_low_quality_question_block(block):
+            continue
+        accepted_question_blocks.append(block)
+
+
+def calculate_number_of_chunks(total_questions, available_chunks=None, max_selected_chunks=8):
     if total_questions <= 5:
-        return 2
-    if total_questions <= 10:
-        return 3
-    if total_questions <= 20:
-        return 4
-    return 5
+        desired_chunks = 2
+    else:
+        desired_chunks = math.ceil(total_questions / 3)
+
+    desired_chunks = min(desired_chunks, max_selected_chunks)
+    if available_chunks is None:
+        return desired_chunks
+
+    return min(available_chunks, desired_chunks)
 
 
 def select_evenly_spaced_chunks(chunks, number_of_chunks):
@@ -225,6 +405,7 @@ def generate_quiz_from_pdf(
     question_type="single-choice",
     language="English",
     chunk_size=5000,
+    chunk_overlap=700,
     min_text_length=300,
     ocr_lang="eng",
     ocr_dpi=200,
@@ -243,18 +424,21 @@ def generate_quiz_from_pdf(
     if len(pdf_text.strip()) == 0:
         return "No text could be extracted from the PDF file."
 
-    chunks = split_text(pdf_text, max_chars=chunk_size)
-    selected_chunks = select_evenly_spaced_chunks(chunks, calculate_number_of_chunks(total_questions))
+    chunks = split_text(pdf_text, max_chars=chunk_size, overlap_chars=chunk_overlap)
+    selected_chunks = select_evenly_spaced_chunks(
+        chunks,
+        calculate_number_of_chunks(total_questions, available_chunks=len(chunks)),
+    )
+    random.shuffle(selected_chunks)
 
     if len(selected_chunks) == 0:
         return "No valid text chunks found."
 
+    accepted_question_blocks = []
     questions_per_chunk = math.ceil(total_questions / len(selected_chunks))
-    all_quizzes = []
-    generated_questions = 0
 
     for index, chunk in enumerate(selected_chunks, start=1):
-        remaining_questions = total_questions - generated_questions
+        remaining_questions = total_questions - len(accepted_question_blocks)
         if remaining_questions <= 0:
             break
 
@@ -266,7 +450,12 @@ def generate_quiz_from_pdf(
             question_type=question_type,
             language=language,
         )
-        generated_questions += current_questions
-        all_quizzes.append(quiz)
+        add_accepted_question_blocks(quiz, accepted_question_blocks, total_questions)
 
-    return renumber_questions("\n\n".join(all_quizzes))
+    if len(accepted_question_blocks) != total_questions:
+        raise RuntimeError(
+            f"Could not generate exactly {total_questions} valid question(s). "
+            f"Accepted {len(accepted_question_blocks)} after filtering."
+        )
+
+    return renumber_questions("\n\n".join(accepted_question_blocks))
